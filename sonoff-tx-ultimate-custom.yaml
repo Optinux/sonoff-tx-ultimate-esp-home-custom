@@ -1,0 +1,99 @@
+---
+substitutions:
+  name: sonoff-tx-ultimate
+  friendly_name: Sonoff TX Ultimate
+  device_format: EU  # REQUIRED: 'EU' or 'US' (case-sensitive, uppercase only)
+  gang_count: 1      # REQUIRED: Number of relays/buttons (1, 2, 3, or 4)
+  BUTTON_LONG_PRESS_DELAY: "600"   # press ≤ 600 ms = tap (click)
+  BUTTON_MULTI_CLICK_DELAY: "0"    # initial value only, set the HA number too
+  hold_time: 1250ms                # time until Raumbeleuchtung fires (keep ≥ BUTTON_LONG_PRESS_DELAY)
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+packages:
+  remote_package:
+    url: https://github.com/edwardtfn/TX-Ultimate-Easy
+    ref: stable  # Or you can specify a version, like `ref: v2024.12.6` or `ref: latest` to the latest non-stable
+    refresh: 5min
+    files:
+      # Core (essential) packages - Do not disable these unless you know what you're doing
+      - ESPHome/TX-Ultimate-Easy-ESPHome_common.yaml              # Basic shared settings
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_buttons.yaml          # Button logic
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_leds.yaml             # LED configuration
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_leds_individual.yaml  # LED configuration
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_touch.yaml            # Touch panel support
+
+      # Optional functionality - Can be enabled/disabled as needed
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_relays.yaml       # Relay control
+      - ESPHome/TX-Ultimate-Easy-ESPHome_hw_vibration.yaml    # Haptic feedback
+
+      # Audio options (use none or choose only one - using both will fail)
+      - ESPHome/TX-Ultimate-Easy-ESPHome_media_player.yaml    # Media player (Recommended for most users)
+      # - ESPHome/TX-Ultimate-Easy-ESPHome_hw_speaker.yaml    # Basic speaker
+
+tx_ultimate_easy:
+  on_long_touch_release:
+    - script.stop: hold_timer
+    - script.execute: touch_on_release
+
+# true while the current touch has already fired the hold (cleared on every release type)
+globals:
+  - id: hold_fired
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  - id: hold_timer
+    mode: single
+    then:
+      - logger.log: "HOLD: timer armed"
+      - delay: ${hold_time}
+      - logger.log: "HOLD: timer fired"
+      - globals.set:
+          id: hold_fired
+          value: 'true'
+      - lambda: |-
+          esphome::tx_ultimate_easy::fire_ha_event("touch", "hold", {{"action", "hold"}});
+      - delay: 150ms   # let the API flush the event before touching the speaker
+      - lambda: |-
+          rtttl_speaker->stop();
+          if (speaker_volume->state > 0) {
+            rtttl_speaker->play("hold:d=16,o=6,b=200:c,e,g");
+          }
+  - id: !extend touch_on_press
+    then:
+      - globals.set:
+          id: hold_fired
+          value: 'false'
+      - script.execute: hold_timer
+  - id: !extend touch_on_release
+    then:
+      - script.stop: hold_timer
+      - globals.set:
+          id: hold_fired
+          value: 'false'
+  # multi-finger tap: fire our own event, but only if this touch did not already fire the hold
+  - id: !extend touch_on_multi_touch_release
+    then:
+      - script.stop: hold_timer
+      - lambda: |-
+          if (!id(hold_fired)) {
+            esphome::tx_ultimate_easy::fire_ha_event("touch", "multi_tap", {{"action", "tap"}});
+          }
+          id(hold_fired) = false;
+  - id: !extend touch_swipe_${ID_SWIPE_LEFT_OR_UP_TEXT}
+    then:
+      - script.stop: hold_timer
+      - globals.set:
+          id: hold_fired
+          value: 'false'
+  - id: !extend touch_swipe_${ID_SWIPE_RIGHT_OR_DOWN_TEXT}
+    then:
+      - script.stop: hold_timer
+      - globals.set:
+          id: hold_fired
+          value: 'false'
+...
