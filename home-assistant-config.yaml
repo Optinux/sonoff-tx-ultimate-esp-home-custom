@@ -1,0 +1,25 @@
+alias: deckenlicht-raumbeleuchtung-tx-ultimate
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.sonoff_tx_ultimate_button_1_click_event
+    to: 'on'
+    id: tap
+  - trigger: event
+    event_type: esphome.tx_ultimate_easy
+    event_data:
+      domain: touch
+      type: multi_tap
+    id: tap
+  - trigger: event
+    event_type: esphome.tx_ultimate_easy
+    event_data:
+      domain: touch
+      type: hold
+    id: hold
+actions:
+  - action: light.toggle
+    target:
+      entity_id: >
+        {{ 'light.raumbeleuchtung' if trigger.id == 'hold' else
+        'light.deckenlicht' }}
+mode: single
